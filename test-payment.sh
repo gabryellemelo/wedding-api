@@ -1,0 +1,42 @@
+#!/bin/bash
+
+# Script para testar o endpoint de pagamento
+# Certifique-se de que o servidor está rodando: npm start
+
+API_URL="http://localhost:3000/api/payments"
+
+echo "🧪 Testando endpoint de pagamento..."
+echo ""
+
+curl -X POST $API_URL \
+  -H "Content-Type: application/json" \
+  -d '{
+    "customer": {
+      "name": "João Silva",
+      "email": "joao@example.com",
+      "cpfCnpj": "12345678900",
+      "phone": "47999999999"
+    },
+    "value": 100.00,
+    "description": "Teste de pagamento - Casamento",
+    "creditCard": {
+      "holderName": "JOAO SILVA",
+      "number": "5162306219378829",
+      "expiryMonth": "05",
+      "expiryYear": "2025",
+      "ccv": "318"
+    },
+    "creditCardHolderInfo": {
+      "name": "João Silva",
+      "email": "joao@example.com",
+      "cpfCnpj": "12345678900",
+      "postalCode": "01310100",
+      "addressNumber": "277",
+      "addressComplement": "Apto 401",
+      "phone": "47999999999"
+    }
+  }' \
+  -w "\n\nStatus HTTP: %{http_code}\n" \
+  -s | jq '.' 2>/dev/null || cat
+
+echo ""

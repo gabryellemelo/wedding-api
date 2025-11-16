@@ -1,0 +1,29 @@
+{
+  "name": "wedding-api",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node src/index.js",
+    "kill-port": "lsof -ti:3000 | xargs kill -9 2>/dev/null || echo 'Porta 3000 está livre'"
+  },
+  "keywords": [
+    "api",
+    "asaas",
+    "supabase",
+    "payments",
+    "express"
+  ],
+  "author": "",
+  "license": "ISC",
+  "description": "API para integração com Asaas para pagamentos com cartão de crédito",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.78.0",
+    "axios": "^1.13.1",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "multer": "^2.0.2",
+    "node-fetch": "^2.7.0"
+  }
+}
