@@ -1,10 +1,12 @@
 {
   "name": "wedding-api",
   "version": "1.0.0",
-  "main": "src/index.js",
+  "main": "dist/index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "node src/index.js",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "dev:watch": "nodemon --exec ts-node src/index.ts",
     "kill-port": "lsof -ti:3000 | xargs kill -9 2>/dev/null || echo 'Porta 3000 está livre'"
   },
   "keywords": [
@@ -25,5 +27,14 @@
     "express": "^5.1.0",
     "multer": "^2.0.2",
     "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.5",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^24.10.1",
+    "nodemon": "^3.1.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
   }
 }
