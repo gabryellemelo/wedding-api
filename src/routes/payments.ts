@@ -1,33 +1,22 @@
 import express, { Request, Response } from 'express';
-import {
-  createCreditCardPayment,
-  createPixPayment,
-  getPixQrCode,
-  getPaymentInstallments
-} from '../services/asaasService';
-import { savePayment, saveMultiplePayments } from '../services/supabaseService';
+import { randomUUID } from 'crypto';
 import { getGiftById } from '../services/giftsService';
-import { calculateInstallments } from '../services/installmentService';
 import {
   CreatePaymentRequest,
   PaymentResponse,
   Customer,
-  CreditCard,
   CreditCardHolderInfo,
   BillingType,
   Gift,
-  InstallmentInfo,
-  SavePaymentData,
   PaymentStatus,
-  AsaasPayment,
-  AsaasPixQrCode
 } from '../types';
 
 const router = express.Router();
 
-const INSTALLMENTS_WAIT_TIME = 1500;
-const PIX_QRCODE_WAIT_TIME = 500;
 const MIN_PAYMENT_VALUE = 0.01;
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 function isValidEmail(email: string): boolean {
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -49,21 +38,6 @@ function validateCustomer(customer: Customer | undefined): { valid: boolean; err
 
   if (!customer.cpfCnpj || typeof customer.cpfCnpj !== 'string' || !customer.cpfCnpj.trim()) {
     return { valid: false, error: 'CPF/CNPJ do cliente é obrigatório' };
-  }
-
-  return { valid: true };
-}
-
-function validateCreditCard(creditCard: CreditCard | undefined): { valid: boolean; error?: string } {
-  if (!creditCard) {
-    return { valid: false, error: 'Dados do cartão de crédito são obrigatórios' };
-  }
-
-  const requiredFields = ['holderName', 'number', 'expiryMonth', 'expiryYear', 'ccv'];
-  for (const field of requiredFields) {
-    if (!creditCard[field as keyof CreditCard] || typeof creditCard[field as keyof CreditCard] !== 'string') {
-      return { valid: false, error: `Campo ${field} do cartão é obrigatório` };
-    }
   }
 
   return { valid: true };
@@ -93,82 +67,52 @@ function validateCreditCardHolder(holderInfo: CreditCardHolderInfo | undefined):
   return { valid: true };
 }
 
-function formatPixQrCode(pixQrCode: AsaasPixQrCode, asaasPayment: AsaasPayment) {
-  if (!pixQrCode || !pixQrCode.payload) {
-    throw new Error('QR Code PIX não foi gerado. Verifique se a chave PIX está configurada no Asaas.');
+/** Map Edge Function status_mapped to frontend-expected status (CONFIRMED for success) */
+function mapStatusForFrontend(statusMapped: string): PaymentStatus {
+  if (statusMapped === 'RECEIVED') {
+    return 'CONFIRMED';
   }
+  return statusMapped as PaymentStatus;
+}
 
-  const copyPaste = pixQrCode.payload.trim();
-
-  if (!copyPaste.startsWith('000201')) {
-    console.warn('Código PIX pode estar em formato incorreto:', copyPaste.substring(0, 50));
-  }
-
-  let encodedImage = pixQrCode.encodedImage || null;
-  if (encodedImage && !encodedImage.startsWith('data:')) {
-    encodedImage = `data:image/png;base64,${encodedImage}`;
-  }
-
-  return {
-    qrCode: null,
-    encodedImage: encodedImage,
-    copyPaste: copyPaste,
-    expirationDate: pixQrCode.expirationDate || asaasPayment.dueDate || null
+interface ProcessarPagamentoResponse {
+  payment_id: string;
+  gateway_payment_id?: number;
+  metodo_pagamento: string;
+  status?: string;
+  status_mapped?: string;
+  status_detail?: string;
+  pix?: {
+    qr_code?: string | null;
+    qr_code_base64?: string | null;
+    copy_paste?: string | null;
+    ticket_url?: string | null;
+    expires_at?: string | null;
   };
 }
 
-function createInstallmentPayments(
-  installments: number,
-  installmentsList: AsaasPayment[],
-  asaasPayment: AsaasPayment,
-  customer: Customer,
-  installmentValue: number | null,
-  finalValue: number,
-  paymentDescription: string,
-  giftId: string | undefined,
-  message: string | undefined
-): SavePaymentData[] {
-  const paymentsToSave: SavePaymentData[] = [];
-
-  for (let i = 0; i < installments; i++) {
-    const foundInstallment = installmentsList.find((inst, idx) => {
-      const instDesc = inst.description || '';
-      const hasParcelaInfo = instDesc.includes(`Parcela ${i + 1}`) ||
-        instDesc.includes(`${i + 1} de ${installments}`);
-
-      return hasParcelaInfo || (idx === i && installmentsList.length === installments);
-    });
-
-    if (foundInstallment) {
-      paymentsToSave.push({
-        asaasPaymentId: foundInstallment.id,
-        customerName: customer.name,
-        customerEmail: customer.email,
-        value: foundInstallment.value || installmentValue || (finalValue / installments),
-        status: (foundInstallment.status || 'PENDING') as PaymentStatus,
-        billingType: (foundInstallment.billingType || 'CREDIT_CARD') as BillingType,
-        description: foundInstallment.description || `Parcela ${i + 1} de ${installments}. ${paymentDescription}`,
-        giftId: giftId || null,
-        message: message || null,
-        paymentDate: foundInstallment.paymentDate || foundInstallment.dueDate || null
-      });
-    } else {
-      paymentsToSave.push({
-        asaasPaymentId: `${asaasPayment.id}_parcela_${i + 1}`,
-        customerName: customer.name,
-        customerEmail: customer.email,
-        value: installmentValue || (finalValue / installments),
-        status: 'PENDING' as PaymentStatus,
-        billingType: 'CREDIT_CARD' as BillingType,
-        description: `Parcela ${i + 1} de ${installments}. ${paymentDescription}`,
-        giftId: giftId || null,
-        message: message || null,
-        paymentDate: null
-      });
-    }
+async function callProcessarPagamento(payload: object): Promise<ProcessarPagamentoResponse> {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error('SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY devem estar configurados');
   }
 
-  return paymentsToSave;
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/processar-pagamento`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const data = (await res.json()) as ProcessarPagamentoResponse & { error?: string; detalhe?: string };
+
+  if (!res.ok) {
+    const msg = data.error || data.detalhe || res.statusText;
+    throw new Error(msg);
+  }
+
+  return data as ProcessarPagamentoResponse;
 }
 
 router.post('/', async (req: Request, res: Response) => {
@@ -178,12 +122,12 @@ router.post('/', async (req: Request, res: Response) => {
       value,
       description,
       billingType,
-      creditCard,
       creditCardHolderInfo,
       giftId,
       installments,
-      interestRate,
-      message
+      message,
+      card_token,
+      payment_method_id,
     }: CreatePaymentRequest = req.body;
 
     const paymentType: BillingType = billingType || 'CREDIT_CARD';
@@ -191,7 +135,7 @@ router.post('/', async (req: Request, res: Response) => {
     const customerValidation = validateCustomer(customer);
     if (!customerValidation.valid) {
       return res.status(400).json({
-        error: customerValidation.error || 'Dados do cliente inválidos'
+        error: customerValidation.error || 'Dados do cliente inválidos',
       });
     }
 
@@ -200,38 +144,36 @@ router.post('/', async (req: Request, res: Response) => {
       gift = await getGiftById(giftId);
       if (!gift) {
         return res.status(400).json({
-          error: 'Presente não encontrado'
+          error: 'Presente não encontrado',
         });
       }
     }
 
-    const paymentValue = gift ? gift.price : (value || 0);
+    const paymentValue = gift ? gift.price : value ?? 0;
 
     if (paymentValue < MIN_PAYMENT_VALUE) {
       return res.status(400).json({
-        error: `Valor do pagamento deve ser maior ou igual a ${MIN_PAYMENT_VALUE}`
+        error: `Valor do pagamento deve ser maior ou igual a ${MIN_PAYMENT_VALUE}`,
       });
     }
 
     if (paymentType === 'CREDIT_CARD') {
-      const cardValidation = validateCreditCard(creditCard);
-      if (!cardValidation.valid) {
+      if (!card_token || typeof card_token !== 'string' || !card_token.trim()) {
         return res.status(400).json({
-          error: cardValidation.error || 'Dados do cartão inválidos'
+          error: 'Token do cartão é obrigatório. Use o formulário de cartão do Mercado Pago para obter o token.',
         });
       }
-
       const holderValidation = validateCreditCardHolder(creditCardHolderInfo);
       if (!holderValidation.valid) {
         return res.status(400).json({
-          error: holderValidation.error || 'Dados do portador inválidos'
+          error: holderValidation.error || 'Dados do portador inválidos',
         });
       }
     }
 
     if (paymentType === 'PIX' && installments && installments > 1) {
       return res.status(400).json({
-        error: 'PIX não suporta parcelamento. Use apenas para pagamento à vista.'
+        error: 'PIX não suporta parcelamento. Use apenas para pagamento à vista.',
       });
     }
 
@@ -239,135 +181,83 @@ router.post('/', async (req: Request, res: Response) => {
       ? `${description || 'Pagamento de casamento'} - Presente: ${gift.name}`
       : (description || 'Pagamento de casamento');
 
-    let installmentInfo: InstallmentInfo | null = null;
-    let finalValue = paymentValue;
-    let installmentValue: number | null = null;
+    const payment_id = randomUUID();
 
-    if (paymentType === 'CREDIT_CARD' && installments && installments > 1) {
-      const calculatedInstallments = calculateInstallments(
-        paymentValue,
-        installments,
-        interestRate || 0
-      );
-
-      installmentInfo = calculatedInstallments;
-      finalValue = calculatedInstallments.totalWithInterest;
-      installmentValue = calculatedInstallments.installmentValue;
-    }
-
-    let asaasPayment: AsaasPayment;
-
-    if (paymentType === 'PIX') {
-      asaasPayment = await createPixPayment({
-        customer: customer as Customer,
-        value: paymentValue,
-        description: paymentDescription
-      });
-    } else {
-      asaasPayment = await createCreditCardPayment({
-        customer: customer as Customer,
-        value: finalValue,
-        description: paymentDescription,
-        creditCard: creditCard as CreditCard,
-        creditCardHolderInfo: creditCardHolderInfo as CreditCardHolderInfo,
-        installments: installments || 1,
-        installmentValue: installmentValue || undefined
-      });
-    }
-
-    let savedPayments: Array<{ id: string; asaas_payment_id: string; value: number; status: PaymentStatus; description: string }> = [];
-
-    if (paymentType === 'CREDIT_CARD' && installments && installments > 1) {
-      await new Promise(resolve => setTimeout(resolve, INSTALLMENTS_WAIT_TIME));
-
-      const installmentsList = await getPaymentInstallments(asaasPayment.id);
-      const paymentsToSave = createInstallmentPayments(
-        installments,
-        installmentsList,
-        asaasPayment,
-        customer as Customer,
-        installmentValue,
-        finalValue,
-        paymentDescription,
-        giftId,
-        message
-      );
-
-      savedPayments = await saveMultiplePayments(paymentsToSave);
-    } else {
-      const savedPayment = await savePayment({
-        asaasPaymentId: asaasPayment.id,
-        customerName: customer.name,
-        customerEmail: customer.email,
-        value: asaasPayment.value || paymentValue,
-        status: asaasPayment.status || 'PENDING',
-        billingType: asaasPayment.billingType || paymentType,
-        description: asaasPayment.description || paymentDescription,
-        giftId: giftId || null,
-        message: message || null,
-        paymentDate: asaasPayment.paymentDate || null
-      });
-      savedPayments = [savedPayment];
-    }
-
-    const response: PaymentResponse = {
-      id: asaasPayment.id,
-      status: asaasPayment.status,
-      value: asaasPayment.value,
-      billingType: asaasPayment.billingType || paymentType,
-      paymentDate: asaasPayment.paymentDate || null,
-      invoiceUrl: asaasPayment.invoiceUrl || null,
-      transactionReceiptUrl: asaasPayment.transactionReceiptUrl || null,
+    const edgePayload: Record<string, unknown> = {
+      payment_id,
       customer: {
-        name: customer.name,
-        email: customer.email
+        name: customer!.name,
+        email: customer!.email,
+        cpfCnpj: customer!.cpfCnpj,
+        phone: customer!.phone,
       },
-      gift: gift ? {
-        id: gift.id,
-        name: gift.name,
-        price: gift.price,
-        image_url: gift.image_url || null
-      } : undefined,
-      localId: savedPayments[0]?.id,
-      savedPayments: savedPayments.map(p => ({
-        id: p.id,
-        asaasPaymentId: p.asaas_payment_id,
-        value: p.value,
-        status: p.status,
-        description: p.description
-      }))
+      value: paymentValue,
+      description: paymentDescription,
+      gift_id: giftId || null,
+      message: message || null,
+      metodo_pagamento: paymentType === 'PIX' ? 'pix' : 'credit_card',
+      quantity: 1,
     };
 
-    if (paymentType === 'PIX') {
-      try {
-        await new Promise(resolve => setTimeout(resolve, PIX_QRCODE_WAIT_TIME));
-
-        const pixQrCode = await getPixQrCode(asaasPayment.id);
-        response.pix = formatPixQrCode(pixQrCode, asaasPayment);
-      } catch (error) {
-        console.error('Erro ao obter QR Code PIX:', error);
-        const errorMessage = error instanceof Error ? error.message : 'Não foi possível obter o QR Code. Verifique se a chave PIX está configurada no Asaas.';
-        response.pix = {
-          qrCode: null,
-          encodedImage: null,
-          copyPaste: null,
-          expirationDate: asaasPayment.dueDate || null,
-          error: errorMessage
-        };
+    if (paymentType === 'CREDIT_CARD') {
+      edgePayload.card_token = card_token!.trim();
+      edgePayload.cardholder_name = creditCardHolderInfo!.name;
+      edgePayload.installments = Math.min(Math.max(installments || 1, 1), 12);
+      if (payment_method_id) {
+        edgePayload.payment_method_id = payment_method_id;
       }
+      edgePayload.payer_document_type = 'CPF';
+      edgePayload.payer_document_number = (customer!.cpfCnpj || creditCardHolderInfo!.cpfCnpj || '').replace(/\D/g, '');
+      edgePayload.cardholder_identification_type = 'CPF';
+      edgePayload.cardholder_identification_number = (creditCardHolderInfo!.cpfCnpj || '').replace(/\D/g, '');
     }
 
-    if (installmentInfo) {
-      response.installments = installmentInfo;
+    const result = await callProcessarPagamento(edgePayload);
+
+    const status: PaymentStatus = mapStatusForFrontend(result.status_mapped || 'PENDING');
+
+    const response: PaymentResponse = {
+      id: String(result.gateway_payment_id ?? result.payment_id),
+      status,
+      value: paymentValue,
+      billingType: paymentType,
+      paymentDate: status === 'CONFIRMED' ? new Date().toISOString() : null,
+      invoiceUrl: null,
+      transactionReceiptUrl: null,
+      customer: {
+        name: customer!.name,
+        email: customer!.email,
+      },
+      gift: gift
+        ? {
+            id: gift.id,
+            name: gift.name,
+            price: gift.price,
+            image_url: gift.image_url || null,
+          }
+        : undefined,
+      localId: result.payment_id,
+    };
+
+    if (paymentType === 'PIX' && result.pix) {
+      let encodedImage = result.pix.qr_code_base64 || null;
+      if (encodedImage && !encodedImage.startsWith('data:')) {
+        encodedImage = `data:image/png;base64,${encodedImage}`;
+      }
+      response.pix = {
+        qrCode: result.pix.qr_code || null,
+        encodedImage,
+        copyPaste: result.pix.copy_paste || null,
+        expirationDate: result.pix.expires_at || null,
+      };
     }
 
     return res.status(201).json(response);
-
   } catch (error) {
     console.error('Erro ao processar pagamento:', error);
     const errorMessage = error instanceof Error ? error.message : 'Erro interno do servidor';
     return res.status(500).json({
-      error: errorMessage
+      error: errorMessage,
     });
   }
 });
@@ -378,31 +268,54 @@ router.get('/:id/pix-qrcode', async (req: Request, res: Response) => {
 
     if (!id || typeof id !== 'string') {
       return res.status(400).json({
-        error: 'ID do pagamento é obrigatório'
+        error: 'ID do pagamento é obrigatório',
       });
     }
 
-    const pixQrCode = await getPixQrCode(id);
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      return res.status(503).json({
+        error: 'Serviço de consulta não configurado',
+      });
+    }
 
-    let encodedImage = pixQrCode.encodedImage || null;
+    const resFetch = await fetch(`${SUPABASE_URL}/functions/v1/consultar-pagamento`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+      body: JSON.stringify({ gateway_payment_id: id }),
+    });
+
+    const data = (await resFetch.json()) as {
+      pix?: { qr_code?: string; qr_code_base64?: string; copy_paste?: string; expires_at?: string };
+      error?: string;
+    };
+
+    if (!resFetch.ok) {
+      return res.status(resFetch.status >= 500 ? 502 : resFetch.status).json({
+        error: data.error || 'Não foi possível consultar o pagamento',
+      });
+    }
+
+    let encodedImage = data.pix?.qr_code_base64 || null;
     if (encodedImage && !encodedImage.startsWith('data:')) {
       encodedImage = `data:image/png;base64,${encodedImage}`;
     }
 
     return res.status(200).json({
-      qrCode: pixQrCode.id || null,
-      encodedImage: encodedImage,
-      copyPaste: pixQrCode.payload || null,
-      expirationDate: pixQrCode.expirationDate || null
+      qrCode: data.pix?.qr_code || null,
+      encodedImage,
+      copyPaste: data.pix?.copy_paste || null,
+      expirationDate: data.pix?.expires_at || null,
     });
   } catch (error) {
     console.error('Erro ao obter QR Code PIX:', error);
     const errorMessage = error instanceof Error ? error.message : 'Erro ao obter QR Code PIX';
     return res.status(500).json({
-      error: errorMessage
+      error: errorMessage,
     });
   }
 });
 
 export default router;
-

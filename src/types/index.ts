@@ -52,8 +52,8 @@ export interface InstallmentInfo {
   totalWithInterest: number;
   totalInterest: number;
   interestRate: number;
-  asaasFee: number;
-  asaasFeePercentage: number;
+  processingFee: number;
+  processingFeePercentage: number;
   userInterest?: number;
   installmentsList: InstallmentDetail[];
 }
@@ -68,7 +68,7 @@ export interface PixData {
 
 export interface SavedPaymentInfo {
   id: string;
-  asaasPaymentId: string;
+  gatewayPaymentId: string;
   value: number;
   status: PaymentStatus;
   description: string;
@@ -97,6 +97,10 @@ export interface CreatePaymentRequest {
   installments?: number;
   interestRate?: number;
   message?: string;
+  /** Mercado Pago: token from card form (required for CREDIT_CARD when using MP) */
+  card_token?: string;
+  /** Mercado Pago: payment_method_id from card form (optional) */
+  payment_method_id?: string;
 }
 
 export interface PaymentResponse {
@@ -128,7 +132,7 @@ export interface CalculateInstallmentsRequest {
   value: number;
   installments: number;
   interestRate?: number;
-  includeAsaasFee?: boolean;
+  includeProcessingFee?: boolean;
 }
 
 export interface CalculateInstallmentsResponse extends InstallmentInfo {
@@ -268,7 +272,7 @@ export interface AsaasPaymentPayload {
 }
 
 export interface SavePaymentData {
-  asaasPaymentId: string;
+  gatewayPaymentId: string;
   customerName: string;
   customerEmail: string;
   value: number;
@@ -281,7 +285,7 @@ export interface SavePaymentData {
 }
 
 export interface PaymentInsertData {
-  asaas_payment_id: string;
+  gateway_payment_id: string;
   customer_name: string;
   customer_email: string;
   value: number;

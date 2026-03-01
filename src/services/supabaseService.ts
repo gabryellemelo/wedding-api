@@ -7,7 +7,7 @@ const DEFAULT_BILLING_TYPE = 'CREDIT_CARD';
 
 interface PaymentRecord {
   id: string;
-  asaas_payment_id: string;
+  gateway_payment_id: string | null;
   customer_name: string;
   customer_email: string;
   value: number;
@@ -23,7 +23,7 @@ interface PaymentRecord {
 
 function mapToPaymentInsertData(paymentData: SavePaymentData): PaymentInsertData {
   return {
-    asaas_payment_id: paymentData.asaasPaymentId,
+    gateway_payment_id: paymentData.gatewayPaymentId,
     customer_name: paymentData.customerName,
     customer_email: paymentData.customerEmail,
     value: paymentData.value,
@@ -52,11 +52,28 @@ export async function savePayment(paymentData: SavePaymentData): Promise<Payment
   return data as PaymentRecord;
 }
 
-export async function getPaymentByAsaasId(asaasPaymentId: string): Promise<PaymentRecord | null> {
+export async function getPaymentByGatewayId(gatewayPaymentId: string): Promise<PaymentRecord | null> {
   const { data, error } = await supabase
     .from(PAYMENTS_TABLE)
     .select('*')
-    .eq('asaas_payment_id', asaasPaymentId)
+    .eq('gateway_payment_id', gatewayPaymentId)
+    .single();
+
+  if (error) {
+    if (error.code === SUPABASE_NOT_FOUND_CODE) {
+      return null;
+    }
+    throw new Error(`Erro ao buscar pagamento no Supabase: ${error.message}`);
+  }
+
+  return data as PaymentRecord;
+}
+
+export async function getPaymentById(id: string): Promise<PaymentRecord | null> {
+  const { data, error } = await supabase
+    .from(PAYMENTS_TABLE)
+    .select('*')
+    .eq('id', id)
     .single();
 
   if (error) {
@@ -70,7 +87,7 @@ export async function getPaymentByAsaasId(asaasPaymentId: string): Promise<Payme
 }
 
 export async function updatePaymentStatus(
-  asaasPaymentId: string,
+  gatewayPaymentId: string,
   status: PaymentStatus,
   additionalData: { paymentDate?: string; value?: number } = {}
 ): Promise<PaymentRecord> {
@@ -89,7 +106,7 @@ export async function updatePaymentStatus(
   const { data, error } = await supabase
     .from(PAYMENTS_TABLE)
     .update(updateData)
-    .eq('asaas_payment_id', asaasPaymentId)
+    .eq('gateway_payment_id', gatewayPaymentId)
     .select()
     .single();
 

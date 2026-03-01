@@ -1,6 +1,6 @@
 import { InstallmentInfo, InstallmentDetail } from '../types';
 
-const ASAAS_FEE_FIXED = 0.49;
+const PROCESSING_FEE_FIXED = 0.49;
 const ROUNDING_FACTOR = 100;
 const PERCENTAGE_DIVISOR = 100;
 
@@ -14,7 +14,7 @@ function roundToTwoDecimals(value: number): number {
   return Math.round(value * ROUNDING_FACTOR) / ROUNDING_FACTOR;
 }
 
-function getAsaasFeePercentage(installments: number): number {
+function getProcessingFeePercentage(installments: number): number {
   if (installments === 1) {
     return FEE_1X;
   }
@@ -30,9 +30,9 @@ function getAsaasFeePercentage(installments: number): number {
   return FEE_MAX;
 }
 
-function calculateAsaasFee(baseValue: number, feePercentage: number): number {
+function calculateProcessingFee(baseValue: number, feePercentage: number): number {
   const percentageFee = (baseValue * feePercentage) / PERCENTAGE_DIVISOR;
-  return percentageFee + ASAAS_FEE_FIXED;
+  return percentageFee + PROCESSING_FEE_FIXED;
 }
 
 function createInstallmentList(installments: number, installmentValue: number): InstallmentDetail[] {
@@ -53,26 +53,26 @@ export function calculateInstallments(
   totalValue: number,
   installments: number,
   interestRate: number = 0,
-  includeAsaasFee: boolean = true
+  includeProcessingFee: boolean = true
 ): InstallmentInfo {
   if (installments < 1) {
     throw new Error('Número de parcelas deve ser maior que zero');
   }
 
   if (installments === 1) {
-    const feePercentage = includeAsaasFee ? getAsaasFeePercentage(1) : 0;
-    const asaasFee = includeAsaasFee ? calculateAsaasFee(totalValue, feePercentage) : 0;
-    const finalValue = totalValue + asaasFee;
+    const feePercentage = includeProcessingFee ? getProcessingFeePercentage(1) : 0;
+    const processingFee = includeProcessingFee ? calculateProcessingFee(totalValue, feePercentage) : 0;
+    const finalValue = totalValue + processingFee;
 
     return {
       totalValue: totalValue,
       installments: 1,
       installmentValue: roundToTwoDecimals(finalValue),
       totalWithInterest: roundToTwoDecimals(finalValue),
-      totalInterest: roundToTwoDecimals(asaasFee),
+      totalInterest: roundToTwoDecimals(processingFee),
       interestRate: 0,
-      asaasFee: roundToTwoDecimals(asaasFee),
-      asaasFeePercentage: feePercentage,
+      processingFee: roundToTwoDecimals(processingFee),
+      processingFeePercentage: feePercentage,
       installmentsList: [{
         installment: 1,
         value: roundToTwoDecimals(finalValue),
@@ -82,9 +82,9 @@ export function calculateInstallments(
   }
 
   if (interestRate === 0) {
-    const feePercentage = includeAsaasFee ? getAsaasFeePercentage(installments) : 0;
-    const asaasFeeTotal = includeAsaasFee ? calculateAsaasFee(totalValue, feePercentage) : 0;
-    const finalValue = totalValue + asaasFeeTotal;
+    const feePercentage = includeProcessingFee ? getProcessingFeePercentage(installments) : 0;
+    const processingFeeTotal = includeProcessingFee ? calculateProcessingFee(totalValue, feePercentage) : 0;
+    const finalValue = totalValue + processingFeeTotal;
     const installmentValue = finalValue / installments;
 
     return {
@@ -92,10 +92,10 @@ export function calculateInstallments(
       installments: installments,
       installmentValue: roundToTwoDecimals(installmentValue),
       totalWithInterest: roundToTwoDecimals(finalValue),
-      totalInterest: roundToTwoDecimals(asaasFeeTotal),
+      totalInterest: roundToTwoDecimals(processingFeeTotal),
       interestRate: 0,
-      asaasFee: roundToTwoDecimals(asaasFeeTotal),
-      asaasFeePercentage: feePercentage,
+      processingFee: roundToTwoDecimals(processingFeeTotal),
+      processingFeePercentage: feePercentage,
       installmentsList: createInstallmentList(installments, installmentValue)
     };
   }
@@ -104,9 +104,9 @@ export function calculateInstallments(
   const installmentValueWithInterest = calculatePriceInstallment(totalValue, monthlyRate, installments);
   const totalWithInterestOnly = installmentValueWithInterest * installments;
 
-  const feePercentage = includeAsaasFee ? getAsaasFeePercentage(installments) : 0;
-  const asaasFeeTotal = includeAsaasFee ? calculateAsaasFee(totalWithInterestOnly, feePercentage) : 0;
-  const finalValue = totalWithInterestOnly + asaasFeeTotal;
+  const feePercentage = includeProcessingFee ? getProcessingFeePercentage(installments) : 0;
+  const processingFeeTotal = includeProcessingFee ? calculateProcessingFee(totalWithInterestOnly, feePercentage) : 0;
+  const finalValue = totalWithInterestOnly + processingFeeTotal;
   const installmentValue = finalValue / installments;
   const totalInterest = finalValue - totalValue;
   const userInterest = totalWithInterestOnly - totalValue;
@@ -118,8 +118,8 @@ export function calculateInstallments(
     totalWithInterest: roundToTwoDecimals(finalValue),
     totalInterest: roundToTwoDecimals(totalInterest),
     interestRate: interestRate,
-    asaasFee: roundToTwoDecimals(asaasFeeTotal),
-    asaasFeePercentage: feePercentage,
+    processingFee: roundToTwoDecimals(processingFeeTotal),
+    processingFeePercentage: feePercentage,
     userInterest: roundToTwoDecimals(userInterest),
     installmentsList: createInstallmentList(installments, installmentValue)
   };

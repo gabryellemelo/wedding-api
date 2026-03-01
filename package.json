@@ -11,14 +11,14 @@
   },
   "keywords": [
     "api",
-    "asaas",
     "supabase",
     "payments",
-    "express"
+    "express",
+    "mercadopago"
   ],
   "author": "",
   "license": "ISC",
-  "description": "API para integração com Asaas para pagamentos com cartão de crédito",
+  "description": "API para pagamentos (Mercado Pago) e lista de presentes de casamento",
   "dependencies": {
     "@supabase/supabase-js": "^2.78.0",
     "axios": "^1.13.1",

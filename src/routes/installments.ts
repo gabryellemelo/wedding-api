@@ -14,7 +14,7 @@ interface CalculateInstallmentsRequestBody {
   value?: number | string;
   installments?: number | string;
   interestRate?: number | string;
-  includeAsaasFee?: boolean;
+  includeProcessingFee?: boolean;
 }
 
 function parseNumericValue(value: number | string | undefined, fieldName: string): { valid: boolean; value?: number; error?: string } {
@@ -33,7 +33,7 @@ function parseNumericValue(value: number | string | undefined, fieldName: string
 
 router.post('/calculate', (req: Request<{}, {}, CalculateInstallmentsRequestBody>, res: Response) => {
   try {
-    const { value, installments, interestRate, includeAsaasFee = true } = req.body;
+    const { value, installments, interestRate, includeProcessingFee = true } = req.body;
 
     const valueValidation = parseNumericValue(value, 'Valor');
     if (!valueValidation.valid || !valueValidation.value) {
@@ -84,9 +84,9 @@ router.post('/calculate', (req: Request<{}, {}, CalculateInstallmentsRequestBody
       });
     }
 
-    if (typeof includeAsaasFee !== 'boolean' && includeAsaasFee !== undefined) {
+    if (typeof includeProcessingFee !== 'boolean' && includeProcessingFee !== undefined) {
       return res.status(400).json({
-        error: 'includeAsaasFee deve ser um valor booleano'
+        error: 'includeProcessingFee deve ser um valor booleano'
       });
     }
 
@@ -94,7 +94,7 @@ router.post('/calculate', (req: Request<{}, {}, CalculateInstallmentsRequestBody
       valueValidation.value,
       installmentsInt,
       interestRateValue.value,
-      includeAsaasFee !== false
+      includeProcessingFee !== false
     );
 
     const dueDates = calculateDueDates(

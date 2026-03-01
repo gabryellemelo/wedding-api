@@ -54,7 +54,7 @@ function logServerStartup(port: number): void {
   console.log(`🎁 Presentes: ${baseUrl}${API_BASE_PATH}/gifts`);
   console.log(`💳 Parcelamento: ${baseUrl}${API_BASE_PATH}/installments/calculate`);
   console.log(`📤 Upload: ${baseUrl}${API_BASE_PATH}/upload/image`);
-  console.log(`🔔 Webhooks: ${baseUrl}${API_BASE_PATH}/webhooks/asaas`);
+  console.log(`🔔 Webhooks MP: configurar no painel MP -> Edge Function webhook-mercadopago`);
 }
 
 app.listen(PORT, () => {
