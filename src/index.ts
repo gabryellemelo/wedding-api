@@ -53,6 +53,7 @@ function logServerStartup(port: number): void {
   console.log(`💳 Pagamentos: ${baseUrl}${API_BASE_PATH}/payments`);
   console.log(`🎁 Presentes: ${baseUrl}${API_BASE_PATH}/gifts`);
   console.log(`💳 Parcelamento: ${baseUrl}${API_BASE_PATH}/installments/calculate`);
+  console.log(`💳 Parcelas MP (por cartão): ${baseUrl}${API_BASE_PATH}/installments/mercadopago?amount=X&payment_method_id=Y&bin=Z`);
   console.log(`📤 Upload: ${baseUrl}${API_BASE_PATH}/upload/image`);
   console.log(`🔔 Webhooks MP: ${baseUrl}${API_BASE_PATH}/webhooks/mercadopago`);
 }

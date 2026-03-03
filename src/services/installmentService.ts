@@ -1,38 +1,30 @@
 import { InstallmentInfo, InstallmentDetail } from '../types';
 
-const PROCESSING_FEE_FIXED = 0.49;
 const ROUNDING_FACTOR = 100;
 const PERCENTAGE_DIVISOR = 100;
 
-const FEE_1X = 2.99;
-const FEE_2_6X = 3.49;
-const FEE_7_12X = 3.99;
-const FEE_13_21X = 4.29;
-const FEE_MAX = 4.29;
+const MERCADOPAGO_ACRESCIMO_POR_PARCELAS: Record<number, number> = {
+  1: 0,
+  2: 8.14,
+  3: 9.73,
+  4: 11.36,
+  5: 12.81,
+  6: 14.15,
+  7: 15.22,
+  8: 16.73,
+  9: 18.19,
+  10: 19.15,
+  11: 20.62,
+  12: 22.11,
+};
 
 function roundToTwoDecimals(value: number): number {
   return Math.round(value * ROUNDING_FACTOR) / ROUNDING_FACTOR;
 }
 
-function getProcessingFeePercentage(installments: number): number {
-  if (installments === 1) {
-    return FEE_1X;
-  }
-  if (installments >= 2 && installments <= 6) {
-    return FEE_2_6X;
-  }
-  if (installments >= 7 && installments <= 12) {
-    return FEE_7_12X;
-  }
-  if (installments >= 13 && installments <= 21) {
-    return FEE_13_21X;
-  }
-  return FEE_MAX;
-}
-
-function calculateProcessingFee(baseValue: number, feePercentage: number): number {
-  const percentageFee = (baseValue * feePercentage) / PERCENTAGE_DIVISOR;
-  return percentageFee + PROCESSING_FEE_FIXED;
+function getMercadoPagoAcrescimoPercentage(installments: number): number {
+  if (installments <= 1) return 0;
+  return MERCADOPAGO_ACRESCIMO_POR_PARCELAS[installments] ?? MERCADOPAGO_ACRESCIMO_POR_PARCELAS[12];
 }
 
 function createInstallmentList(installments: number, installmentValue: number): InstallmentDetail[] {
@@ -43,84 +35,49 @@ function createInstallmentList(installments: number, installmentValue: number): 
   }));
 }
 
-function calculatePriceInstallment(baseValue: number, monthlyRate: number, installments: number): number {
-  const numerator = monthlyRate * Math.pow(1 + monthlyRate, installments);
-  const denominator = Math.pow(1 + monthlyRate, installments) - 1;
-  return baseValue * (numerator / denominator);
-}
-
+/**
+ * Calcula parcelas com a taxa de acréscimo do Mercado Pago (o que o cliente paga).
+ * includeProcessingFee: quando true, usa taxas MP; quando false, total sem acréscimo (ex.: PIX).
+ */
 export function calculateInstallments(
   totalValue: number,
   installments: number,
-  interestRate: number = 0,
+  _interestRate: number = 0,
   includeProcessingFee: boolean = true
 ): InstallmentInfo {
   if (installments < 1) {
     throw new Error('Número de parcelas deve ser maior que zero');
   }
 
-  if (installments === 1) {
-    const feePercentage = includeProcessingFee ? getProcessingFeePercentage(1) : 0;
-    const processingFee = includeProcessingFee ? calculateProcessingFee(totalValue, feePercentage) : 0;
-    const finalValue = totalValue + processingFee;
-
-    return {
-      totalValue: totalValue,
-      installments: 1,
-      installmentValue: roundToTwoDecimals(finalValue),
-      totalWithInterest: roundToTwoDecimals(finalValue),
-      totalInterest: roundToTwoDecimals(processingFee),
-      interestRate: 0,
-      processingFee: roundToTwoDecimals(processingFee),
-      processingFeePercentage: feePercentage,
-      installmentsList: [{
-        installment: 1,
-        value: roundToTwoDecimals(finalValue),
-        dueDate: null
-      }]
-    };
-  }
-
-  if (interestRate === 0) {
-    const feePercentage = includeProcessingFee ? getProcessingFeePercentage(installments) : 0;
-    const processingFeeTotal = includeProcessingFee ? calculateProcessingFee(totalValue, feePercentage) : 0;
-    const finalValue = totalValue + processingFeeTotal;
-    const installmentValue = finalValue / installments;
-
+  if (!includeProcessingFee) {
+    const installmentValue = totalValue / installments;
     return {
       totalValue: totalValue,
       installments: installments,
       installmentValue: roundToTwoDecimals(installmentValue),
-      totalWithInterest: roundToTwoDecimals(finalValue),
-      totalInterest: roundToTwoDecimals(processingFeeTotal),
+      totalWithInterest: roundToTwoDecimals(totalValue),
+      totalInterest: 0,
       interestRate: 0,
-      processingFee: roundToTwoDecimals(processingFeeTotal),
-      processingFeePercentage: feePercentage,
+      processingFee: 0,
+      processingFeePercentage: 0,
       installmentsList: createInstallmentList(installments, installmentValue)
     };
   }
 
-  const monthlyRate = interestRate / PERCENTAGE_DIVISOR;
-  const installmentValueWithInterest = calculatePriceInstallment(totalValue, monthlyRate, installments);
-  const totalWithInterestOnly = installmentValueWithInterest * installments;
-
-  const feePercentage = includeProcessingFee ? getProcessingFeePercentage(installments) : 0;
-  const processingFeeTotal = includeProcessingFee ? calculateProcessingFee(totalWithInterestOnly, feePercentage) : 0;
-  const finalValue = totalWithInterestOnly + processingFeeTotal;
-  const installmentValue = finalValue / installments;
-  const totalInterest = finalValue - totalValue;
-  const userInterest = totalWithInterestOnly - totalValue;
+  const feePercentage = getMercadoPagoAcrescimoPercentage(installments);
+  const totalWithInterest = totalValue * (1 + feePercentage / PERCENTAGE_DIVISOR);
+  const installmentValue = totalWithInterest / installments;
+  const totalInterest = totalWithInterest - totalValue;
 
   return {
     totalValue: totalValue,
     installments: installments,
     installmentValue: roundToTwoDecimals(installmentValue),
-    totalWithInterest: roundToTwoDecimals(finalValue),
+    totalWithInterest: roundToTwoDecimals(totalWithInterest),
     totalInterest: roundToTwoDecimals(totalInterest),
-    interestRate: interestRate,
-    processingFee: roundToTwoDecimals(processingFeeTotal),
+    interestRate: 0,
+    processingFee: roundToTwoDecimals(totalInterest),
     processingFeePercentage: feePercentage,
-    userInterest: roundToTwoDecimals(userInterest),
     installmentsList: createInstallmentList(installments, installmentValue)
   };
 }

@@ -13,6 +13,7 @@ const router = express.Router();
  * Evento: "Pagamentos". Opcional: assinatura secreta (MERCADOPAGO_WEBHOOK_SECRET).
  */
 router.post('/mercadopago', async (req: Request, res: Response) => {
+  console.log('[Webhook MP] POST recebido', { type: req.body?.type, dataId: req.body?.data?.id });
   try {
     const payload = req.body as MercadoPagoWebhookPayload;
     const xSignature = req.headers['x-signature'] as string | undefined;
@@ -25,9 +26,11 @@ router.post('/mercadopago', async (req: Request, res: Response) => {
     }
 
     if (payload.type !== 'payment' || !payload.data?.id) {
+      console.log('[Webhook MP] Ignorado (type ou data.id ausente)');
       return res.status(200).send('OK');
     }
 
+    console.log('[Webhook MP] Processando pagamento id:', payload.data.id);
     await processMercadoPagoPaymentNotification(String(payload.data.id));
     return res.status(200).send('OK');
   } catch (err) {

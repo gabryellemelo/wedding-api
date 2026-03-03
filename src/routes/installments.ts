@@ -1,12 +1,13 @@
 import express, { Request, Response } from 'express';
 import { calculateInstallments, calculateDueDates } from '../services/installmentService';
+import { getMercadoPagoInstallments } from '../services/mercadopagoInstallmentsService';
 import { CalculateInstallmentsResponse } from '../types';
 
 const router = express.Router();
+const MIN_VALUE = 0.01;
 
 const MAX_INSTALLMENTS = 21;
 const MIN_INSTALLMENTS = 1;
-const MIN_VALUE = 0.01;
 const MAX_INTEREST_RATE = 100;
 const MIN_INTEREST_RATE = 0;
 
@@ -117,6 +118,46 @@ router.post('/calculate', (req: Request<{}, {}, CalculateInstallmentsRequestBody
     return res.status(500).json({
       error: errorMessage
     });
+  }
+});
+
+/**
+ * Parcelas reais do Mercado Pago (valor que será cobrado no cartão).
+ * Query: amount (valor), payment_method_id (ex: visa, master), bin (primeiros 6-8 dígitos do cartão).
+ * O front deve chamar quando o usuário digitar o número do cartão (BIN disponível no SDK do MP).
+ */
+router.get('/mercadopago', async (req: Request, res: Response) => {
+  try {
+    const amountParam = req.query.amount;
+    const paymentMethodId = req.query.payment_method_id as string | undefined;
+    const bin = req.query.bin as string | undefined;
+
+    const amount = typeof amountParam === 'string' ? parseFloat(amountParam) : Number(amountParam);
+    if (isNaN(amount) || amount < MIN_VALUE) {
+      return res.status(400).json({
+        error: 'Query "amount" é obrigatória e deve ser um número maior que 0',
+      });
+    }
+    if (!paymentMethodId || typeof paymentMethodId !== 'string' || !paymentMethodId.trim()) {
+      return res.status(400).json({
+        error: 'Query "payment_method_id" é obrigatória (ex: visa, master)',
+      });
+    }
+    if (!bin || typeof bin !== 'string' || bin.replace(/\D/g, '').length < 6) {
+      return res.status(400).json({
+        error: 'Query "bin" é obrigatória (primeiros 6 a 8 dígitos do cartão)',
+      });
+    }
+
+    const options = await getMercadoPagoInstallments(amount, paymentMethodId.trim(), bin);
+    return res.status(200).json({
+      totalValue: amount,
+      options,
+    });
+  } catch (error) {
+    console.error('Erro ao buscar parcelas MP:', error);
+    const message = error instanceof Error ? error.message : 'Erro ao consultar parcelas';
+    return res.status(500).json({ error: message });
   }
 });
 

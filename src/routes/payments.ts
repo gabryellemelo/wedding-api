@@ -182,6 +182,7 @@ router.post('/', async (req: Request, res: Response) => {
       : (description || 'Pagamento de casamento');
 
     const payment_id = randomUUID();
+    const numInstallments = Math.min(Math.max(installments || 1, 1), 12);
 
     const edgePayload: Record<string, unknown> = {
       payment_id,
@@ -202,7 +203,7 @@ router.post('/', async (req: Request, res: Response) => {
     if (paymentType === 'CREDIT_CARD') {
       edgePayload.card_token = card_token!.trim();
       edgePayload.cardholder_name = creditCardHolderInfo!.name;
-      edgePayload.installments = Math.min(Math.max(installments || 1, 1), 12);
+      edgePayload.installments = numInstallments;
       if (payment_method_id) {
         edgePayload.payment_method_id = payment_method_id;
       }
